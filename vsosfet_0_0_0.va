@@ -1,0 +1,221 @@
+// Disclaimer: At this stage not truly a virtual source model //
+// Further improvements done on 17th July 2023 compared to previous version sent to Xiangjin for his 3D DRAM IEDM //
+`include "constants.vams"
+`include "disciplines.vams"
+
+module vsosfet_0_0_0(d, g, s); // NMOS only
+    inout d, g, s;
+    electrical d, g, s;
+    electrical di, si, df, sf; // gi, di and si are intrinsic gate, drain and source respectively, sf and df are the effective surface potential at source and drain respectively
+
+    `define M0 		9.10938215e-31
+    `define EPS0    8.85418782e-12
+
+    parameter real 		version 		= 	0.00;                                     //      VSOSFET model version = 0.0.0
+    parameter real      T               =   296.0                   from (0:inf);     //     Temperature [K]
+    parameter real      mu              =   25                     from (0:inf);     //     Band mobility [cm^2 / V s]
+    parameter real      W               =   8                     from (0:inf);     //      OSFET Width [um]
+    parameter real      Leff            =   2                       from (0:inf);     //      Effective Gate Length [um]
+    parameter real      dLg             =   2                      from [0:inf);     //      Overlap length including both source and drain sides [um]
+    parameter real      Vfb             =   0.95                   from (-inf:inf);  //      Flatband voltage [V] --> extract from numerical simulation
+    parameter real      kde             =   16.6                      from (0:inf);     //      Dielectric constant of gate dielectric
+    parameter real      tde             =   10e-9                    from (0:inf);     //      Gate Dielectric thickness [m]
+    parameter real      tos             =   3.5e-9                    from (0:inf);     //      Channnel Oxide Semiconductor thickness [m]
+    parameter real      Cgeff           =   0.012                       from (0:inf);     //      Effective gate capacitance [F/m^-2]
+    parameter real      Nte             =   1.6e16                    from [0:inf);     //      Exponential tail states areal density [m^-2]
+    parameter real      Tte             =   650                     from (0:inf);     //      Exponential tail states temperature [K]
+    parameter real      Nde             =   0e16                    from [0:inf);     //      Exponential deep states areal density [m^-2]
+    parameter real      Tde             =   1000                     from (0:inf);     //      Exponential deep states temperature [K]
+    parameter real      Ndu             =   0e15                    from [0:inf);     //      Uniform deep states areal density [m^-2]
+    parameter real      Tdu             =   6000                    from (0:inf);     //      Uniform deep states temperature [K]
+    parameter real      Epdu            =   0.0                    from (-inf:inf);  //      Uniform deep states mean energy [eV]
+    parameter real      Vdep            =   0.31                   from (-inf:inf);     //    Contribution to VT because of depletion --> extract from numerical simulation
+    parameter real      meff            =   0.3                     from [0:1];       //      OS effective mass factor   
+    parameter real      Rs0       		= 	160.0           		from (0:inf);     //  	  Access Resistance Source terminal [Ohms-um]
+    parameter real      Rd0       		= 	160.0           		from (0:inf);     //  	  Access Resistance Drain terminal [Ohms-um]
+    parameter real      nSS             =   1.15                  from [1:inf);     //      Subthreshold Swing Factor
+    parameter real      delta           =   0.0                   from [0:inf);       //     DIBL factor [V/V]
+    
+    analog function real sgamma;
+        input x;
+        real x, y, sm;
+        real ra[1:30];
+        integer i;
+        begin
+            ra[1] = 1.00000000000000000000; ra[2] = 0.57721566490153286061; ra[3] = -0.65587807152025388108;
+            ra[4] = -0.04200263503409523553; ra[5] = 0.16653861138229148950; ra[6] = -0.04219773455554433675;
+            ra[7] = -0.00962197152787697356; ra[8] = 0.00721894324666309954; ra[9] = -0.00116516759185906511;
+            ra[10] = -0.00021524167411495097; ra[11] = 0.00012805028238811619; ra[12] = -0.00002013485478078824;
+            ra[13] = -0.00000125049348214267; ra[14] = 0.00000113302723198170; ra[15] = -0.00000020563384169776;
+            ra[16] = 0.00000000611609510448; ra[17] = 0.00000000500200764447; ra[18] = -0.00000000118127457049;
+            ra[19] = 0.00000000010434267117; ra[20] = 0.00000000000778226344; ra[21] = -0.00000000000369680562;
+            ra[22] = 0.00000000000051003703; ra[23] = -0.00000000000002058326; ra[24] = -0.00000000000000534812;
+            ra[25] = 0.00000000000000122678; ra[26] = -0.00000000000000011813; ra[27] = 0.00000000000000000119;
+            ra[28] = 0.00000000000000000141; ra[29] = -0.00000000000000000023; ra[30] = 0.00000000000000000002;
+            
+            i = 29;
+            y = x - 1.0;
+            sm = ra[30];
+            for (i = 29; i >= 1; i = i-1) begin
+                sm = sm * y + ra[i];
+            end
+            sgamma = 1.0 / sm;
+        end
+    endfunction
+
+    analog function real hyp21_series;
+        input aa, bb, cc, x;
+        real a, b, c, aa, bb, cc, x, TOLERANCE, term, value;
+        integer n;
+        begin
+            a = aa;
+            b = bb;
+            c = cc;
+            TOLERANCE = 1e-10;
+            term = a * b * x / c;
+            value = 1.0 + term;
+            n = 1;
+            while ( abs( term ) > TOLERANCE ) begin
+                a = a + 1;
+                b = b + 1;
+                c = c + 1;
+                n = n + 1; 
+                term = term * a * b * x / (c * n);
+                value = value + term;
+            end
+            hyp21_series = value;
+        end
+    endfunction
+
+    analog function real hyp21_self;
+        input a, b, c, x;
+        real a, b, c, x, value;
+        begin
+            if (abs(x) < 1) begin
+                value = hyp21_series(a,b,c,x);
+            end
+            if (abs(x) > 1) begin
+                value = pow(-x,-a)*(sgamma(c)*sgamma(b-a))/(sgamma(b)*sgamma(c-a))*hyp21_series(a,a-c+1,a-b+1,1/x);
+                value = value + pow(-x,-b)*(sgamma(c)*sgamma(a-b))/(sgamma(a)*sgamma(c-b))*hyp21_series(b-c+1,b,b-a+1,1/x);
+            end
+            if (abs(x) == 1) begin
+                value = pow(1-x,-a)*hyp21_series(a,c-b,c,x/(x-1));
+            end
+            hyp21_self = value;
+        end
+    endfunction
+
+    real Vds, Vgs, Vgsi, Vdsi, Vgsraw, Vgdraw, Vgfb;
+    real mseff, phit, kT, hbar, Rs, Rd, Ltot;
+    real nfS, nteS, ndeS, nduS, nfD, nteD, ndeD, nduD, Nch;
+    real g2D, E1, ii, phitdu;
+    real Qfx0, Qx0, QfxL, QxL, Qintx0, QintxL, Cde, Id, mueff;
+    real A, B, QG, QD, QS, Qdi, Qsi, Cestimate;
+    integer dir;
+
+    analog begin
+        // Ltot, Rs, Rd calculation
+        Ltot = Leff + Lg;
+        Rs = Rs0 / W;
+        Rd = Rd0 / W;
+
+        // Voltage definitions
+        Vgsraw = V(g) - V(si);
+        Vgdraw = V(g) - V(di);
+        
+        if (Vgsraw >= Vgdraw) begin
+            Vgs = V(g) - V(s);
+            Vgsi = Vgsraw;
+            Vds = V(d) - V(s);
+            Vdsi = V(di) - V(si);
+            dir = 1;
+        end
+        else begin
+            Vgs = V(g) - V(d);
+            Vgsi = Vgdraw;
+            Vds = V(s) - V(d);
+            Vdsi = V(si) - V(di);
+            dir = -1;
+        end
+
+        Vgfb = Vgsi - Vfb + Vdep + delta*Vdsi;
+
+        // Initialization of variables
+        phit = `P_K * T / `P_Q; // Thermal voltage [V]
+        kT = `P_K * T;  // Thermal energy [J]
+        hbar = `P_H/(2.0*`M_PI); // Reduced planck's constant [J-s]
+
+        // calculation of free carrier density nf
+        mseff = meff*`M0;
+        g2D = (mseff*`P_Q)/(`M_PI*pow(hbar,2));
+        E1 = pow(hbar*`M_PI,2)/(2*`P_Q*mseff*pow(tos,2));
+        nfS = 0;
+        nfD = 0;
+        // for (ii=1; ii<=subbands; ii=ii+1) begin
+        //     nfS = nfS + g2D * phit * ln( 1+exp( -(E1*pow(ii, 2) - V(sf)/nSS)/phit ) );
+        //     nfD = nfD + g2D * phit * ln( 1+exp( -(E1*pow(ii, 2) - V(df)/nSS + Vdsi)/phit ) );
+        // end
+        ii = 1;
+        while (E1*pow(ii, 2) < 40*phit) begin
+            nfS = nfS + g2D * phit * ln( 1+exp( -(E1*pow(ii, 2) - V(sf)/nSS)/phit ) );
+            nfD = nfD + g2D * phit * ln( 1+exp( -(E1*pow(ii, 2) - V(df)/nSS + Vdsi)/phit ) );
+            ii = ii + 1;
+        end
+
+        // calculation of exponential tail state density nte
+        nteS = Nte * hyp21_self( 1, T/Tte, 1+T/Tte, -exp( (E1-V(sf)/nSS)/phit ) );
+        nteD = Nte * hyp21_self( 1, T/Tte, 1+T/Tte, -exp( (E1-V(df)/nSS + Vdsi)/phit ) );
+
+        // calculation of exponential deep state density ntd
+        ndeS = Nde * hyp21_self( 1, T/Tde, 1+T/Tde, -exp( (E1-V(sf)/nSS)/phit ) );
+        ndeD = Nde * hyp21_self( 1, T/Tde, 1+T/Tde, -exp( (E1-V(df)/nSS + Vdsi)/phit ) );
+
+        // calculation of uniform deep state density ntd
+        phitdu = `P_K * Tdu / `P_Q;
+        nduS = Ndu * T * ( ln( 1 + exp( -(Epdu-V(sf)/nSS-phitdu) / phit ) ) - ln( 1 + exp( -(Epdu-V(sf)/nSS+phitdu) / phit ) ) ) / (2 * Tdu);
+        nduD = Ndu * T * ( ln( 1 + exp( -(Epdu-V(df)/nSS+Vdsi-phitdu) / phit ) ) - ln( 1 + exp( -(Epdu-V(df)/nSS+Vdsi+phitdu) / phit ) ) ) / (2 * Tdu);
+
+        // self-consistently solve for V(sf) and V(df)
+        Cde = `EPS0 * kde / tde;
+        Cestimate = (W*1e-6)*(Ltot*1e-6)*Cde;
+        $display ("Gate Capacitance estimate = %e", Cestimate);
+
+        V(sf) <+  Vgfb - `P_Q * (nteS + ndeS + nduS + nfS) / Cgeff ;
+        V(df) <+  Vgfb - `P_Q * (nteD + ndeD + nduD + nfD) / Cgeff ;
+        // $display ("value computed = %f", V(sf));
+        // $display ("value computed = %f", V(df));
+
+        // calculation of free and total charge at S and D
+        Qfx0 = `P_Q * (nfS);
+        Qx0 = `P_Q * (nfS + nteS + ndeS + nduS);
+        QfxL = `P_Q * (nfD);
+        QxL = `P_Q * (nfD + nteD + ndeD + nduD);
+        Qintx0 = Cgeff*(Vgfb*V(sf) - pow(V(sf),2)/2);
+        QintxL = Cgeff*(Vgfb*V(df) - pow(V(df),2)/2);
+        // $display ("free carrier density = %f", nf);
+
+        // Computing Id
+        muSI = 1e-4*mu;
+        mueff = muSI*Qfx0/Qx0;
+        // Id = (mueff*W/Leff)*((QintxL-Qintx0)/nSS+phit*(Qx0-QxL));
+        Id = (mueff*W/Leff)*((QintxL-Qintx0)/nSS) + (muSI*W/Leff)*(phit*(Qfx0-QfxL));
+
+        // Computing terminal charges
+        A = Vgfb - V(sf);
+        B = Vgfb - V(df);
+        QG = (W*1e-6)*(Leff*1e-6)*Cgeff*( 2*(pow(A,2)+pow(B,2)+A*B) / (3*(A+B)) ) + (W*1e-6)*(0.5*dLg*1e-6)*Cde*(2*Vgsi-Vdsi);
+        // $display ("value computed = %f", QG);
+        QD = -(W*1e-6)*(Leff*1e-6)*Cgeff*( 2*(2*pow(A,3)+4*pow(A,2)*B+6*A*pow(B,2)+3*pow(B,3)) / (15*pow(A+B,2)) ) - (W*1e-6)*(0.5*dLg*1e-6)*Cde*(Vgsi-Vdsi);
+        QS = -QD-QG;
+
+        Qdi = ((1+dir)*QD+(1-dir)*QS)/2.0;
+        Qsi = ((1+dir)*QS+(1-dir)*QD)/2.0;
+
+        //Sub-circuit initialization
+	    I(di, si) <+ dir * Id;
+	    I(d, di) <+ (V(d)-V(di)) / Rd;
+	    I(si, s) <+ (V(si)-V(s)) / Rs;
+        I(d, g) <+ ddt(Qdi);
+        I(s, g) <+ ddt(Qsi);
+    end
+endmodule
