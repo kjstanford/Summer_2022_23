@@ -115,7 +115,7 @@ module vsosfet_0_0_0(d, g, s); // NMOS only
 
     analog begin
         // Ltot, Rs, Rd calculation
-        Ltot = Leff + Lg;
+        Ltot = Leff + dLg;
         Rs = Rs0 / W;
         Rd = Rd0 / W;
 
