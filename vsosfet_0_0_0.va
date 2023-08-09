@@ -109,7 +109,7 @@ module vsosfet_0_0_0(d, g, s); // NMOS only
     real mseff, phit, kT, hbar, Rs, Rd, Ltot;
     real nfS, nteS, ndeS, nduS, nfD, nteD, ndeD, nduD, Nch;
     real g2D, E1, ii, phitdu;
-    real Qfx0, Qx0, QfxL, QxL, Qintx0, QintxL, Cde, Id, mueff;
+    real Qfx0, Qx0, QfxL, QxL, Qintx0, QintxL, Cde, Id, mueff, muSI;
     real A, B, QG, QD, QS, Qdi, Qsi, Cestimate;
     integer dir;
 
